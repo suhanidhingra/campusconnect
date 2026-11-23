@@ -2,10 +2,11 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import './cinematic.css'
+import './campus.css'
 
 export const metadata: Metadata = {
   title: 'CampusConnect — Discover more. Connect better.',
-  description: 'Your student space to discover campus opportunities, meet your people, and grow together.',
+  description: 'A personalised campus community for student news, peer connections, academic assignments and opportunities.',
   generator: 'v0.app',
   icons: {
     icon: [
