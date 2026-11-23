@@ -1,6 +1,7 @@
 import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import './cinematic.css'
 
 export const metadata: Metadata = {
   title: 'CampusConnect — Discover more. Connect better.',
