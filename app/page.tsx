@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Bell, Bookmark, BookOpen, CalendarDays, Check, ChevronDown, Compass, GraduationCap, Heart, Home, Layers3, Menu, MessageCircle, Search, Send, Sparkles, Users, X, BriefcaseBusiness, Clock3, MapPin, Plus, UserRound, BookmarkCheck, LogOut } from 'lucide-react'
 import { AuthScreen, LandingScreen } from '@/components/auth-landing'
 import { CampusTools } from '@/components/campus-tools'
+import { supabase } from '@/lib/supabase/client'
 
 type Profile = { name: string; university: string; major: string; course?: string; year: string; semester?: string; graduationYear?: string; bio: string; skills: string; interests: string }
 type Item = { id: number; title: string; category: string; subtitle: string; meta: string; color: string; icon: string }
@@ -63,20 +64,30 @@ export default function Page() {
   const [mobileNav, setMobileNav] = useState(false)
   const [welcome, setWelcome] = useState(false)
   useEffect(() => {
-    const restoreScreen = () => {
+    let active = true
+    const restoreScreen = async () => {
       const path = window.location.pathname
-      let session: Partial<Profile> | null = null
-      try { session = JSON.parse(localStorage.getItem('cc-auth-session') || 'null') as Partial<Profile> | null } catch { session = null }
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!active) return
       if (path === '/login') setScreen('login')
       else if (path === '/signup') setScreen('signup')
-      else if (session?.name) { setScreen('dashboard'); if(new URLSearchParams(window.location.search).get('section')==='feed')setActive('Campus Feed'); setProfile(current => ({ ...current, name: session?.name || current.name, major: session?.major || current.major, course: session?.course || current.course, year: session?.year || current.year, university: session?.university || current.university, semester: session?.semester || current.semester })) }
-      else setScreen('landing')
+      else if (session?.user) {
+        const { data: account } = await supabase.from('profiles').select('display_name,role,course,branch,academic_year,semester').eq('id', session.user.id).maybeSingle()
+        if (!active) return
+        if (!account || account.role !== 'student') { await supabase.auth.signOut(); setScreen('landing'); return }
+        setScreen('dashboard')
+        if (new URLSearchParams(window.location.search).get('section') === 'feed') setActive('Campus Feed')
+        setProfile(current => ({ ...current, name: account.display_name || current.name, major: account.branch || account.course || current.major, course: account.course || current.course, year: account.academic_year || current.year, semester: account.semester || current.semester }))
+      } else setScreen('landing')
     }
-    const s = localStorage.getItem('cc-saved'), r = localStorage.getItem('cc-registered'), p = localStorage.getItem('cc-profile'), q = localStorage.getItem('cc-requests')
-    if (s) setSaved(JSON.parse(s)); if (r) setRegistered(JSON.parse(r)); if (p) setProfile(JSON.parse(p)); if (q) setRequested(JSON.parse(q))
+    const s = localStorage.getItem('cc-saved'), r = localStorage.getItem('cc-registered'), q = localStorage.getItem('cc-requests')
+    if (s) setSaved(JSON.parse(s)); if (r) setRegistered(JSON.parse(r)); if (q) setRequested(JSON.parse(q))
     if (!localStorage.getItem('cc-welcomed')) setWelcome(true)
-    restoreScreen(); window.addEventListener('popstate', restoreScreen)
-    return () => window.removeEventListener('popstate', restoreScreen)
+    void restoreScreen()
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => { void restoreScreen() })
+    const handlePopState = () => { void restoreScreen() }
+    window.addEventListener('popstate', handlePopState)
+    return () => { active = false; subscription.unsubscribe(); window.removeEventListener('popstate', handlePopState) }
   }, [])
   useEffect(() => { const handleCampusNavigation = (event: Event) => setPage((event as CustomEvent<string>).detail); window.addEventListener('campus-nav', handleCampusNavigation); return () => window.removeEventListener('campus-nav', handleCampusNavigation) }, [])
   const navigateAuth = (page: 'login' | 'signup' | 'landing' | 'dashboard') => {
@@ -85,11 +96,18 @@ export default function Page() {
   }
   const finishAuth = (user: { name: string; email: string; major: string; year: string; university: string; course?: string; semester?: string; graduationYear?: string }) => {
     const nextProfile = { ...profile, name:user.name, university:user.university, major:user.major, course:user.course, year:user.year, semester:user.semester||profile.semester, graduationYear:user.graduationYear||profile.graduationYear }
-    setProfile(nextProfile); persist('profile', nextProfile); setScreen('dashboard')
+    setProfile(nextProfile); setScreen('dashboard')
     window.history.pushState({}, '', '/dashboard')
     notify(`Welcome${user.name ? `, ${user.name.split(' ')[0]}` : ''}! You’re signed in.`)
   }
-  const logout = () => { localStorage.removeItem('cc-auth-session'); setScreen('landing'); window.history.pushState({}, '', '/'); notify('You’ve been logged out.') }
+  const logout = async () => {
+    if (!window.confirm('Log out of CampusConnect?')) return
+    const { error } = await supabase.auth.signOut()
+    if (error) { notify('We couldn’t log you out. Please try again.'); return }
+    setScreen('landing')
+    window.history.replaceState({}, '', '/')
+    notify('You’ve been logged out.')
+  }
   const persist = (key: string, value: unknown) => { try { localStorage.setItem(`cc-${key}`, JSON.stringify(value)) } catch { setNotice('Could not save. Check your browser storage settings.') } }
   const notify = (text: string) => { setNotice(text); window.setTimeout(() => setNotice(''), 3000) }
   const setPage = (page: string) => { setActive(page); setQuery(''); setCategory('All'); setMobileNav(false) }
