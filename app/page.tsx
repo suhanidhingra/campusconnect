@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Bell, Bookmark, BookOpen, CalendarDays, Check, ChevronDown, Compass, GraduationCap, Heart, Home, Layers3, Menu, MessageCircle, Search, Send, Sparkles, Users, X, BriefcaseBusiness, Clock3, MapPin, Plus, UserRound, BookmarkCheck, LogOut } from 'lucide-react'
 import { AuthScreen, LandingScreen } from '@/components/auth-landing'
 import { CampusTools } from '@/components/campus-tools'
+import { supabase } from '@/lib/supabase/client'
 
 type Profile = { name: string; university: string; major: string; course?: string; year: string; semester?: string; graduationYear?: string; bio: string; skills: string; interests: string }
 type Item = { id: number; title: string; category: string; subtitle: string; meta: string; color: string; icon: string }
@@ -43,9 +44,9 @@ const alumni = [
   { name: 'Ethan Park', initials: 'EP', title: 'Founder · Class of 2017', field: 'Entrepreneurship', company: 'Fieldnote', color: 'mint', story: '“Find your people first. The big idea usually comes after.”' },
 ]
 const nav = [
-  { label: 'Overview', icon: Home }, { label: 'Campus Feed', icon: MessageCircle }, { label: 'Announcements', icon: Bell }, { label: 'Assignments', icon: Check }, { label: 'Opportunities', icon: BriefcaseBusiness }, { label: 'Events', icon: CalendarDays }, { label: 'Resources', icon: BookOpen }, { label: 'Peer connect', icon: Users }, { label: 'Mentorship', icon: Heart }, { label: 'Alumni', icon: GraduationCap },
+  { label: 'Overview', icon: Home }, { label: 'Campus Feed', icon: MessageCircle }, { label: 'Announcements', icon: Bell }, { label: 'Assignments', icon: Check }, { label: 'Opportunities', icon: BriefcaseBusiness }, { label: 'Events', icon: CalendarDays }, { label: 'Resources', icon: BookOpen }, { label: 'Peer connect', icon: Users }, { label: 'Friends', icon: Users }, { label: 'Mentorship', icon: Heart }, { label: 'Alumni', icon: GraduationCap },
 ]
-const titles: Record<string, [string, string]> = { Dashboard: ['Your campus, connected.', 'Good things happen when you find your people. Here’s what’s happening around you.'], Opportunities: ['Find your next thing.', 'Big ideas, new experiences, and opportunities made for you.'], Events: ['Make room for moments.', 'Workshops, meetups, and little things worth showing up for.'], Resources: ['Study smarter, together.', 'Good notes are better when they’re shared. All resources are demo examples.'], 'Peer connect': ['Your people are here.', 'Find a teammate, a study buddy, or someone who just gets it.'], Mentorship: ['A little guidance goes far.', 'Meet experienced people who remember what starting out felt like.'], Alumni: ['The next chapter starts here.', 'Connect with alumni sharing their own journeys. Sample profiles, not verified alumni.'], CampusBot: ['Ask CampusBot.', 'A friendly guide to finding your way around CampusConnect.'], Profile: ['A profile that feels like you.', 'Let people know what you’re curious about and what you can bring.'], 'Campus Feed': ['Your campus, in the moment.', 'A student-powered space for updates, ideas, and everyday wins.'], Announcements: ['The latest from campus.', 'Source-linked updates and important notices from your university.'], Assignments: ['Make deadlines feel manageable.', 'A personal academic planner for the work ahead.'] }
+const titles: Record<string, [string, string]> = { Dashboard: ['Your campus, connected.', 'Good things happen when you find your people. Here’s what’s happening around you.'], Opportunities: ['Find your next thing.', 'Big ideas, new experiences, and opportunities made for you.'], Events: ['Make room for moments.', 'Workshops, meetups, and little things worth showing up for.'], Resources: ['Study smarter, together.', 'Good notes are better when they’re shared. All resources are demo examples.'], 'Peer connect': ['Your people are here.', 'Find a teammate, a study buddy, or someone who just gets it.'], Friends: ['Your campus circle.', 'Find classmates, manage requests, and keep up with your friends.'], Mentorship: ['A little guidance goes far.', 'Meet experienced people who remember what starting out felt like.'], Alumni: ['The next chapter starts here.', 'Connect with alumni sharing their own journeys. Sample profiles, not verified alumni.'], CampusBot: ['Ask CampusBot.', 'A friendly guide to finding your way around CampusConnect.'], Profile: ['A profile that feels like you.', 'Let people know what you’re curious about and what you can bring.'], 'Campus Feed': ['Your campus, in the moment.', 'A student-powered space for updates, ideas, and everyday wins.'], Announcements: ['The latest from campus.', 'Source-linked updates and important notices from your university.'], Assignments: ['Make deadlines feel manageable.', 'A personal academic planner for the work ahead.'] }
 
 export default function Page() {
   const [active, setActive] = useState('Dashboard')
@@ -63,20 +64,30 @@ export default function Page() {
   const [mobileNav, setMobileNav] = useState(false)
   const [welcome, setWelcome] = useState(false)
   useEffect(() => {
-    const restoreScreen = () => {
+    let active = true
+    const restoreScreen = async () => {
       const path = window.location.pathname
-      let session: Partial<Profile> | null = null
-      try { session = JSON.parse(localStorage.getItem('cc-auth-session') || 'null') as Partial<Profile> | null } catch { session = null }
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!active) return
       if (path === '/login') setScreen('login')
       else if (path === '/signup') setScreen('signup')
-      else if (session?.name) { setScreen('dashboard'); if(new URLSearchParams(window.location.search).get('section')==='feed')setActive('Campus Feed'); setProfile(current => ({ ...current, name: session?.name || current.name, major: session?.major || current.major, course: session?.course || current.course, year: session?.year || current.year, university: session?.university || current.university, semester: session?.semester || current.semester })) }
-      else setScreen('landing')
+      else if (session?.user) {
+        const { data: account } = await supabase.from('profiles').select('display_name,role,course,branch,academic_year,semester').eq('id', session.user.id).maybeSingle()
+        if (!active) return
+        if (!account || account.role !== 'student') { await supabase.auth.signOut(); setScreen('landing'); return }
+        setScreen('dashboard')
+        if (new URLSearchParams(window.location.search).get('section') === 'feed') setActive('Campus Feed')
+        setProfile(current => ({ ...current, name: account.display_name || current.name, major: account.branch || account.course || current.major, course: account.course || current.course, year: account.academic_year || current.year, semester: account.semester || current.semester }))
+      } else setScreen('landing')
     }
-    const s = localStorage.getItem('cc-saved'), r = localStorage.getItem('cc-registered'), p = localStorage.getItem('cc-profile'), q = localStorage.getItem('cc-requests')
-    if (s) setSaved(JSON.parse(s)); if (r) setRegistered(JSON.parse(r)); if (p) setProfile(JSON.parse(p)); if (q) setRequested(JSON.parse(q))
+    const s = localStorage.getItem('cc-saved'), r = localStorage.getItem('cc-registered'), q = localStorage.getItem('cc-requests')
+    if (s) setSaved(JSON.parse(s)); if (r) setRegistered(JSON.parse(r)); if (q) setRequested(JSON.parse(q))
     if (!localStorage.getItem('cc-welcomed')) setWelcome(true)
-    restoreScreen(); window.addEventListener('popstate', restoreScreen)
-    return () => window.removeEventListener('popstate', restoreScreen)
+    void restoreScreen()
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => { void restoreScreen() })
+    const handlePopState = () => { void restoreScreen() }
+    window.addEventListener('popstate', handlePopState)
+    return () => { active = false; subscription.unsubscribe(); window.removeEventListener('popstate', handlePopState) }
   }, [])
   useEffect(() => { const handleCampusNavigation = (event: Event) => setPage((event as CustomEvent<string>).detail); window.addEventListener('campus-nav', handleCampusNavigation); return () => window.removeEventListener('campus-nav', handleCampusNavigation) }, [])
   const navigateAuth = (page: 'login' | 'signup' | 'landing' | 'dashboard') => {
@@ -85,11 +96,18 @@ export default function Page() {
   }
   const finishAuth = (user: { name: string; email: string; major: string; year: string; university: string; course?: string; semester?: string; graduationYear?: string }) => {
     const nextProfile = { ...profile, name:user.name, university:user.university, major:user.major, course:user.course, year:user.year, semester:user.semester||profile.semester, graduationYear:user.graduationYear||profile.graduationYear }
-    setProfile(nextProfile); persist('profile', nextProfile); setScreen('dashboard')
+    setProfile(nextProfile); setScreen('dashboard')
     window.history.pushState({}, '', '/dashboard')
     notify(`Welcome${user.name ? `, ${user.name.split(' ')[0]}` : ''}! You’re signed in.`)
   }
-  const logout = () => { localStorage.removeItem('cc-auth-session'); setScreen('landing'); window.history.pushState({}, '', '/'); notify('You’ve been logged out.') }
+  const logout = async () => {
+    if (!window.confirm('Log out of CampusConnect?')) return
+    const { error } = await supabase.auth.signOut()
+    if (error) { notify('We couldn’t log you out. Please try again.'); return }
+    setScreen('landing')
+    window.history.replaceState({}, '', '/')
+    notify('You’ve been logged out.')
+  }
   const persist = (key: string, value: unknown) => { try { localStorage.setItem(`cc-${key}`, JSON.stringify(value)) } catch { setNotice('Could not save. Check your browser storage settings.') } }
   const notify = (text: string) => { setNotice(text); window.setTimeout(() => setNotice(''), 3000) }
   const setPage = (page: string) => { setActive(page); setQuery(''); setCategory('All'); setMobileNav(false) }
@@ -113,7 +131,7 @@ export default function Page() {
     return <div className="cards-grid">{filteredItems.map(item => <article className="listing-card" key={item.id}><div className="listing-top"><div className={`tile ${item.color}`}>{item.icon}</div><button className={`icon-button ${saved.includes(item.id) ? 'is-saved' : ''}`} aria-label={saved.includes(item.id) ? 'Remove bookmark' : 'Bookmark'} onClick={() => toggleSaved(item.id)}><Bookmark size={17} fill={saved.includes(item.id) ? 'currentColor' : 'none'}/></button></div><span className="eyebrow">{item.category}</span><h3>{item.title}</h3><p className="listing-desc">{item.subtitle}</p><div className="listing-meta"><span>{mode === 'event' ? <MapPin size={14}/> : mode === 'resource' ? <BookOpen size={14}/> : <Clock3 size={14}/>} {item.meta}</span></div>{mode === 'event' ? <button className={`action-button ${registered.includes(item.id) ? 'secondary-button' : ''}`} onClick={() => toggleEvent(item.id)}>{registered.includes(item.id) ? <><Check size={15}/> Registered · Cancel</> : <>Register <ArrowRight size={15}/></>}</button> : <button className="text-action" onClick={() => mode === 'resource' ? toggleSaved(item.id) : notify(`More details for ${item.title} are ready to explore.`)}>{mode === 'resource' ? saved.includes(item.id) ? 'Saved to your list' : 'Save resource' : 'Explore opportunity'} <ArrowRight size={15}/></button>}</article>)}</div>
   }
   const content = () => {
-    if (['Campus Feed', 'Announcements', 'Assignments'].includes(active)) return <CampusTools section={active} profile={profile} notify={notify}/>
+    if (['Campus Feed', 'Announcements', 'Assignments', 'Friends'].includes(active)) return <CampusTools section={active} profile={profile} notify={notify}/>
     if (active === 'Opportunities') return <><SectionToolbar query={query} setQuery={setQuery} category={category} setCategory={setCategory} options={['All', 'Internship', 'Hackathon', 'Scholarship', 'Volunteering', 'Competition']} placeholder="Search opportunities..."/>{renderItems(opportunities, 'opportunity')}</>
     if (active === 'Events') return <><div className="demo-note"><CalendarDays size={16}/><span>Event listings are demo examples only; dates and venues have not been confirmed.</span></div><div className="registered-strip"><div><span className="eyebrow">YOUR CALENDAR</span><strong>{registered.length ? `${registered.length} event${registered.length === 1 ? '' : 's'} on your list` : 'A little something to look forward to'}</strong></div><span className="registered-count"><CalendarDays size={17}/>{registered.length} registered</span></div><SectionToolbar query={query} setQuery={setQuery} category={category} setCategory={setCategory} options={['All', 'Workshop', 'Networking', 'Wellbeing', 'Social']} placeholder="Find an event..."/>{renderItems(events, 'event')}</>
     if (active === 'Resources') return <><div className="demo-note"><Sparkles size={16}/><span>Everything below is a sample resource created for your demo.</span></div><SectionToolbar query={query} setQuery={setQuery} category={category} setCategory={setCategory} options={['All', 'Study notes', 'Previous paper', 'Presentation', 'PDF guide']} placeholder="Search study resources..."/><div className="select-row"><label>Subject <select onChange={e => setQuery(e.target.value === 'All subjects' ? '' : e.target.value)}><option>All subjects</option><option>MATH 202</option><option>PSYC 101</option><option>ENTR 210</option><option>BIO 110</option></select></label><label>Semester <select onChange={e => e.target.value !== 'Any semester' && setQuery(e.target.value)}><option>Any semester</option><option>Semester 1</option><option>Semester 2</option><option>Semester 3</option></select></label></div>{renderItems(resources, 'resource')}</>
